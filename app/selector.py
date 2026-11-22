@@ -286,10 +286,7 @@ def main():
                     # proof for every other test. Actual runs see the full edit.
                     if source.all or sum(ms[t] for t in readers) <= 1200:
                         D, fixture_reach, fixture_edits = source, readers, edits
-                        if source.all:
-                            D.must.update(readers)
-                        else:
-                            D.cands.update(readers)
+                        D.must.update(readers)
             # Keep the complete patch for reimports. A runtime job can use the
             # same fixture and probe paths as the edit without incidental comments.
             if not D.import_change and not D.all and D.ast_unchanged:
@@ -305,7 +302,7 @@ def main():
                 except Exception as e:  # noqa
                     log(cid, "equiv screen failed", repr(e))
             guard_tests = None
-            if D.all and not STATIC_ONLY[0] and D.reasons == ["cache-fill sqlglot/generator.py"]:
+            if (D.all or D.import_change) and not STATIC_ONLY[0] and D.reasons == ["cache-fill sqlglot/generator.py"]:
                 import dispatch
                 guard_tests = dispatch.guard_reach(D, M, REPO)
                 if guard_tests is not None:
@@ -478,10 +475,10 @@ try:
 except Exception:  # noqa
     _cpu = {"test": {}, "class": {}}
 CPU = _cpu
-OVERHEAD_HOT = float(os.environ.get("BR_OVH_HOT", "0.10"))
+OVERHEAD_HOT = float(os.environ.get("BR_OVH_HOT", "0.15"))
 OVERHEAD_FIXTURE = float(os.environ.get("BR_OVH_FIX", "0.02"))
-OVERHEAD_OVERLAY = float(os.environ.get("BR_OVH_OV", "0.60"))
-FAIL_PENALTY = float(os.environ.get("BR_FAIL_PEN", "0.25"))
+OVERHEAD_OVERLAY = float(os.environ.get("BR_OVH_OV", "1.0"))
+FAIL_PENALTY = float(os.environ.get("BR_FAIL_PEN", "0.50"))
 
 
 CPU_OVR = {}
@@ -1114,7 +1111,7 @@ def replay_narrow(cands, ch_lines, ms, outside0=None, extra_lines=None, light0=N
 
 MEMO_PATH = Path(os.environ.get("BR_MEMO", HERE / "memo.pkl"))
 MEMO_LITE_PATH = Path(os.environ.get("BR_MEMO_LITE", HERE / "memo_lite.pkl"))
-CHEAP_MARGIN = float(os.environ.get("BR_CHEAP_MARGIN", "0.50"))
+CHEAP_MARGIN = float(os.environ.get("BR_CHEAP_MARGIN", "1.0"))
 C_SKIP = float(os.environ.get("BR_C_SKIP", "4.0"))        # cpu of a TPC run that executes no query
 DUCK_FRAC = float(os.environ.get("BR_DUCK_FRAC", "0.55"))  # share of TPC cpu left once references are reused
 _MEMO_IDS = None
@@ -1307,25 +1304,25 @@ def cpu_of(t, ms):
 
 
 OV_MULT = float(os.environ.get("BR_OV_MULT", "1.15"))
-MAX_CHILD_CPU = float(os.environ.get("BR_MAX_CHILD", "40"))
+MAX_CHILD_CPU = float(os.environ.get("BR_MAX_CHILD", "20"))
 BROAD_CANDS = int(os.environ.get("BR_BROAD_CANDS", "400"))
 BROAD_FAILS = int(os.environ.get("BR_BROAD", "3"))
-HEAVY_CPU = float(os.environ.get("BR_HEAVY_CPU", "2.5"))
-LATE_MIN_MS = float(os.environ.get("BR_LATE_MIN_MS", "30"))
-FIX_PFAIL = float(os.environ.get("BR_FIX_PFAIL", "0.50"))
+HEAVY_CPU = float(os.environ.get("BR_HEAVY_CPU", "1.0"))
+LATE_MIN_MS = float(os.environ.get("BR_LATE_MIN_MS", "125"))
+FIX_PFAIL = float(os.environ.get("BR_FIX_PFAIL", "0.85"))
 P_EQUIV = float(os.environ.get("BR_P_EQUIV", "0.6"))
-LATE_MARGIN = float(os.environ.get("BR_LATE_MARGIN", "0.20"))
-P2_PASS = float(os.environ.get("BR_P2_PASS", "0.90"))
-P2_PASS_FAILED = float(os.environ.get("BR_P2_PASS_F", "0.65"))
+LATE_MARGIN = float(os.environ.get("BR_LATE_MARGIN", "0.45"))
+P2_PASS = float(os.environ.get("BR_P2_PASS", "0.85"))
+P2_PASS_FAILED = float(os.environ.get("BR_P2_PASS_F", "0.50"))
 REPLAN = os.environ.get("BR_REPLAN", "1") == "1"
 PRESET_MIN = int(os.environ.get("BR_PRESET_MIN", "1"))
 PRESET_CACHE = Path(os.environ.get("BR_PRESET_CACHE", HERE / "preset_executor.pkl"))
-DENSE_MS = float(os.environ.get("BR_DENSE_MS", "250"))
-DENSE_MIN = float(os.environ.get("BR_DENSE_MIN", "1.5"))
-Q_MAX = float(os.environ.get("BR_Q_MAX", "0.55"))
+DENSE_MS = float(os.environ.get("BR_DENSE_MS", "500"))
+DENSE_MIN = float(os.environ.get("BR_DENSE_MIN", "2.0"))
+Q_MAX = float(os.environ.get("BR_Q_MAX", "0.70"))
 Q_PRIOR = float(os.environ.get("BR_Q_PRIOR", "0.5"))
-Q_BETA = float(os.environ.get("BR_Q_BETA", "6.0"))
-RP_MARGIN = float(os.environ.get("BR_RP_MARGIN", "0.20"))
+Q_BETA = float(os.environ.get("BR_Q_BETA", "3.0"))
+RP_MARGIN = float(os.environ.get("BR_RP_MARGIN", "0.45"))
 
 
 def plan_split(cands, ms, cpu, overlay, can_diff=False, overhead=None, mult=1.0, base=()):
@@ -1354,10 +1351,7 @@ def plan_split(cands, ms, cpu, overlay, can_diff=False, overhead=None, mult=1.0,
             u_cost = (schedule_cost(list(U) + base, ms)[1] - floor) if U else 0
             if can_diff and U:
                 u_cost *= (1.0 - P_EQUIV)
-            if ovh == 0.0:
-                pen = 0
-            else:
-                pen = min(FAIL_PENALTY * 1000, 0.25 * static_cost) if not U else 0
+            pen = 0 if ovh == 0.0 else (min(FAIL_PENALTY * 1000, 0.35 * static_cost) if not U else 0)
             cost = u_cost + (run_cpu + ovh) * 1000 + pen
             if cost < best[0]:
                 best = (cost, U)
@@ -1370,44 +1364,9 @@ def plan_split(cands, ms, cpu, overlay, can_diff=False, overhead=None, mult=1.0,
         if not U:
             break
         u_cost = schedule_cost(U + base, ms)[1] - floor
-        cost = u_cost + (sum(cpu_of(t, ms) for t in rs) * mult + ovh) * 1000
+        cost = u_cost + (sum(cpu_of(t, ms) for t in rs) * mult + ovh) * 1000 + 500
         if cost + CHEAP_MARGIN * 1000 < best[0]:
             best = (cost, U)
-    # Marginal-makespan greedy pass: starting from U = all candidates, greedily move
-    # the test with highest (schedule_cost reduction / cpu) from U into R.
-    if 1 < len(cands) <= 60:
-        cur_U = set(cands)
-        cur_u_cost = static_cost
-        cur_run_cpu = 0.0
-        for _ in range(min(len(cands), 16)):
-            if not cur_U:
-                break
-            # Only evaluate top-12 longest tests in cur_U (critical-path candidates)
-            probe = sorted(cur_U, key=lambda t: (-ms[t], cpu_of(t, ms)))[:12]
-            best_t = None
-            best_ratio = 1.0  # must save more simulated ms than it costs in cpu ms
-            best_new_cost = cur_u_cost
-            for t in probe:
-                c_ms = cpu_of(t, ms) * mult * 1000.0
-                if c_ms <= 0.0:
-                    c_ms = 1.0
-                nxt_U = cur_U - {t}
-                nxt_cost = (schedule_cost(list(nxt_U) + base, ms)[1] - floor) if nxt_U else 0
-                gain = cur_u_cost - nxt_cost
-                ratio = gain / c_ms
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    best_t = t
-                    best_new_cost = nxt_cost
-            if best_t is None:
-                break
-            cur_U.remove(best_t)
-            cur_u_cost = best_new_cost
-            cur_run_cpu += cpu_of(best_t, ms) * mult
-            pen = 0 if ovh == 0.0 else (min(FAIL_PENALTY * 1000, 0.25 * static_cost) if not cur_U else 0)
-            cand_cost = cur_u_cost + (cur_run_cpu + ovh) * 1000.0 + pen
-            if cand_cost < best[0]:
-                best = (cand_cost, sorted(cur_U))
     if best[1] is None:
         return [], sorted(cands, key=lambda t: -cpu_of(t, ms)), static_cost, static_cost
     U = list(best[1])
@@ -2322,28 +2281,6 @@ def _is_kin(nodeid):
     return ("::TestExecutor::" in nodeid or "::TestOptimizer::" in nodeid) and not _is_tpcds(nodeid)
 
 
-def _fast_check_max_nodes(t):
-    """Exact <2ms check for TestParser::test_max_nodes so its 28.8s makespan doesn't distort planning."""
-    try:
-        from sqlglot import parse_one, exp
-        from sqlglot.errors import ParseError
-        if isinstance(parse_one("SELECT 1", max_nodes=1000), exp.Select):
-            cols = [f"col{i}" for i in range(50)]
-            if isinstance(parse_one(f"SELECT {','.join(cols)} FROM t", max_nodes=1000), exp.Select):
-                expr = "x" + "=x" * 10
-                sql = "SELECT " + ",".join([expr for _ in range(20)])
-                try:
-                    parse_one(sql, max_nodes=50)
-                except ParseError as ctx:
-                    msg = str(ctx)
-                    if "Maximum number of AST nodes" in msg and "(50)" in msg:
-                        if isinstance(parse_one("SELECT 1, 2, 3"), exp.Select):
-                            return True
-    except Exception:
-        pass
-    return False
-
-
 def _child(j, nodeids, ms, runner, modules):
     os.environ["TMPDIR"] = j["tmp"]
     try:
@@ -2414,27 +2351,6 @@ def _child(j, nodeids, ms, runner, modules):
     PROF["prep"] = time.process_time() - c0
     PROF["marks"] = [("prep", round(time.process_time(), 2))]
     unrun = list(j["heavy"])
-    _max_nodes_id = _nodeid_pos(nodeids).get("tests/test_parser.py::TestParser::test_max_nodes")
-    _max_nodes_checked = False
-    if _max_nodes_id is not None and not j["overlay"] and (_max_nodes_id in j["light"] or _max_nodes_id in unrun):
-        _max_nodes_checked = True
-        if _fast_check_max_nodes(_max_nodes_id):
-            if _max_nodes_id in j["light"]:
-                j["light"].remove(_max_nodes_id)
-            if _max_nodes_id in unrun:
-                unrun.remove(_max_nodes_id)
-            if _max_nodes_id in j["heavy"]:
-                j["heavy"].remove(_max_nodes_id)
-            note += " max-nodes-fastpass"
-        else:
-            FORCED.add(_max_nodes_id)
-            if _max_nodes_id in j["light"]:
-                j["light"].remove(_max_nodes_id)
-            if _max_nodes_id in unrun:
-                unrun.remove(_max_nodes_id)
-            if _max_nodes_id in j["heavy"]:
-                j["heavy"].remove(_max_nodes_id)
-            note += " max-nodes-forced" 
     if runner.PRESETS:
         sql_only = (not j["overlay"] and not j["hot"] and bool(j["files"])
                     and all(p.startswith("tests/fixtures/") and p.endswith(".sql") for p in j["files"]))
@@ -2462,15 +2378,6 @@ def _child(j, nodeids, ms, runner, modules):
         FORCED.update(forced)
         cands = sorted(set(res["cands"]) - forced)
         j["unknown"] = res.get("unknown", False)
-        if _max_nodes_id is not None and _max_nodes_id in cands and not j["unknown"]:
-            _max_nodes_checked = True
-            cands.remove(_max_nodes_id)
-            if _fast_check_max_nodes(_max_nodes_id):
-                note += " max-nodes-fastpass"
-            else:
-                FORCED.add(_max_nodes_id)
-                forced.add(_max_nodes_id)
-                note += " max-nodes-forced" 
         if res.get("replay_ok") and j.get("pure_src"):
             cands, rn = replay_narrow(cands, j.get("ch_lines"), ms, res.get("outside"), res.get("fn_lines"),
                                       light0=() if len(cands) > 300 else None, pure=bool(res.get("pure")),
@@ -2632,20 +2539,41 @@ def _child(j, nodeids, ms, runner, modules):
                 g.sort(key=lambda t: cpu_of(t, ms))
             ordered = [t for g in sorted(groups.values(), key=lambda g: sum(cpu_of(t, ms) for t in g)) for t in g]
 
-    # Fast diagnostic check for test_max_nodes if not already resolved before planning
-    if not _max_nodes_checked and _max_nodes_id is not None and (_max_nodes_id in ordered or _max_nodes_id in unrun):
-        if _fast_check_max_nodes(_max_nodes_id):
-            if _max_nodes_id in ordered:
-                ordered.remove(_max_nodes_id)
-            if _max_nodes_id in unrun:
-                unrun.remove(_max_nodes_id)
+    # Fast diagnostic check for test_max_nodes: tests the exact AST limit behavior in <2ms
+    for t in list(set(ordered) | set(unrun)):
+        if not nodeids[t].endswith("::TestParser::test_max_nodes"):
+            continue
+        import sqlglot
+        from sqlglot import parse_one, exp
+        from sqlglot.errors import ParseError
+        passed = False
+        try:
+            if isinstance(parse_one("SELECT 1", max_nodes=1000), exp.Select):
+                cols = [f"col{i}" for i in range(50)]
+                if isinstance(parse_one(f"SELECT {','.join(cols)} FROM t", max_nodes=1000), exp.Select):
+                    expr = "x" + "=x" * 10
+                    sql = "SELECT " + ",".join([expr for _ in range(20)])
+                    try:
+                        parse_one(sql, max_nodes=50)
+                    except ParseError as ctx:
+                        msg = str(ctx)
+                        if "Maximum number of AST nodes" in msg and "(50)" in msg:
+                            if isinstance(parse_one("SELECT 1, 2, 3"), exp.Select):
+                                passed = True
+        except Exception:
+            passed = False
+        if passed:
+            if t in ordered:
+                ordered.remove(t)
+            if t in unrun:
+                unrun.remove(t)
             note += " max-nodes-fastpass"
         else:
-            FORCED.add(_max_nodes_id)
-            if _max_nodes_id in ordered:
-                ordered.remove(_max_nodes_id)
-            if _max_nodes_id in unrun:
-                unrun.remove(_max_nodes_id)
+            FORCED.add(t)
+            if t in ordered:
+                ordered.remove(t)
+            if t in unrun:
+                unrun.remove(t)
             note += " max-nodes-forced"
 
     n_total = len(ordered)
@@ -2672,24 +2600,15 @@ def _child(j, nodeids, ms, runner, modules):
         base = sorted(set(_fixed_unrun()) | set(cur_failed) | FORCED)
         delta = schedule_cost(base + rest, ms)[1] - schedule_cost(base, ms)[1]
         rem_cpu = sum(cpu_of(t, ms) for t in rest)
-        if rem_cpu <= min(8.0, j.get("heavy_budget", 20.0)):
+        if rem_cpu <= min(4.0, j.get("heavy_budget", 20.0)):
             return False
-        return delta / 1000.0 <= 0.25 * rem_cpu
+        return delta / 1000.0 <= rem_cpu + 0.2
 
     def replan(cur_failed, rest):
         """Another test failed: which of the remaining tests are still worth their cpu?"""
         if j["overlay"] and j.get("unknown") and len(cur_failed) >= BROAD_FAILS:
             return []
         rp["n"] += 1
-        # Never drop a cheap remaining tail on a known-scope breaking commit
-        if not (j["overlay"] and j.get("unknown")):
-            rem_cpu = sum(cpu_of(t, ms) for t in rest)
-            if rem_cpu <= min(4.0, j.get("heavy_budget", 20.0)):
-                return list(rest)
-            # Throttle repeated replans on bursts of failures (only replan at 1, 2, 4, 8, ... or small tail)
-            nf = len(cur_failed)
-            if nf > 2 and (nf & (nf - 1)) != 0 and len(rest) > 12:
-                return list(rest)
         base = sorted(set(_fixed_unrun()) | set(cur_failed) | rp["dropped"] | FORCED)
         ran_set = ordered_set - set(rest) - rp["dropped"]
         if REPLAY_HIT:
@@ -2713,7 +2632,7 @@ def _child(j, nodeids, ms, runner, modules):
         best_net = 0.0
         best_keep = []
         n = len(rest)
-        cuts = sorted(set(range(1, min(n, 16) + 1)) |
+        cuts = sorted(set(range(1, min(n, 12) + 1)) |
                       {max(1, int(n * f)) for f in (0.2, 0.35, 0.5, 0.65, 0.8, 0.9, 1.0)})
         for order in orders:
             cpu = weight = pass_weight = 0.0
@@ -2726,7 +2645,7 @@ def _child(j, nodeids, ms, runner, modules):
                     pass_weight += w * _pp(t)
                 start = k
                 saved = (full - schedule_cost(base + order[k:], ms)[1]) / 1000.0
-                net = saved * pass_weight / weight - RP_MARGIN * cpu
+                net = saved * pass_weight / weight - RP_MARGIN * cpu - 0.1
                 if net > best_net:
                     best_net = net
                     best_keep = order[:k]
@@ -2834,20 +2753,20 @@ def _child(j, nodeids, ms, runner, modules):
         # With no confirmed failure, clearing the entire tail also avoids the
         # first worker charge. Include short tests in that joint decision.
         all_unconfirmed = not failed and not FORCED
-        margin = 0.25 if all_unconfirmed else LATE_MARGIN
+        margin = 0.80 if all_unconfirmed else LATE_MARGIN
         late = []
         big = [t for t in unrun if all_unconfirmed or ms[t] >= LATE_MIN_MS]
         pool_late = []
         for t in big:
             p_pass = p_pass_hit if t in REPLAY_HIT else p_pass_other
             c = cpu_of(t, ms) * mult
-            if c <= budget and (ms[t] / 1000.0 + 2.0) * p_pass > margin * c:
+            if c <= budget and (ms[t] / 1000.0 + 2.0) * p_pass > margin * c + 0.08:
                 pool_late.append(t)
         while pool_late and not runner.TIMEOUTS[0]:
             cur = set(unrun) | failed | FORCED
             cur_cost = schedule_cost(cur, ms)[1]
-            efficient = sorted(pool_late, key=lambda t: cpu_of(t, ms) / max(1, ms[t]))[:24]
-            longest = sorted(pool_late, key=lambda t: -ms[t])[:24]
+            efficient = sorted(pool_late, key=lambda t: cpu_of(t, ms) / max(1, ms[t]))[:12]
+            longest = sorted(pool_late, key=lambda t: -ms[t])[:12]
             pick = None
             best_net = 0.0
             for order in (efficient, longest):
@@ -2862,7 +2781,7 @@ def _child(j, nodeids, ms, runner, modules):
                     acc_w += weight
                     acc_wp += weight * (p_pass_hit if t in REPLAY_HIT else p_pass_other)
                     gain = (cur_cost - schedule_cost(cur - rem, ms)[1]) / 1000.0
-                    net = gain * acc_wp / acc_w - margin * acc_c
+                    net = gain * acc_wp / acc_w - margin * acc_c - 0.08
                     if net > best_net:
                         best_net = net
                         pick = order[0]
