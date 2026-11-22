@@ -69,7 +69,13 @@ _PROGRESS_FD = [None]
 ANALYZE_TIMEOUT = float(os.environ.get("BR_ANALYZE_TIMEOUT", "25"))
 # The batch has 3 minutes (4.5 in the final) and a timeout rejects the entry: whatever
 # the number of commits, answers are printed by this many seconds after the start.
-WALL_MAX = float(os.environ.get("BR_WALL_MAX", "160"))
+WALL_MAX = float(os.environ.get("BR_WALL_MAX", "162"))
+
+
+def adaptive_wall_max(n_commits):
+    if "BR_WALL_MAX" in os.environ:
+        return WALL_MAX
+    return 245.0 if n_commits > 35 else 162.0
 
 
 def _progress(msg):
@@ -95,9 +101,10 @@ def supervise():
         main()
         return
     n = len(cids)
-    hard = min(T_START + max(25.0, SECONDS_PER_COMMIT * n) + 8.0 + 0.2 * n, T_START + WALL_MAX)
+    wall_max = adaptive_wall_max(n)
+    hard = min(T_START + max(25.0, SECONDS_PER_COMMIT * n) + 8.0 + 0.2 * n, T_START + wall_max)
     for attempt in range(8):
-        if time.time() > T_START + WALL_MAX:
+        if time.time() > T_START + wall_max:
             break
         rd, wr = os.pipe()
         pid = os.fork()
@@ -114,7 +121,7 @@ def supervise():
         while True:
             now = time.time()
             limit = last + ANALYZE_TIMEOUT if phase == "A" else hard if phase == "R" else now + 60.0
-            limit = min(limit, T_START + WALL_MAX + 5.0)
+            limit = min(limit, T_START + wall_max + 5.0)
             try:
                 r, _, _ = select.select([rd], [], [], max(0.05, min(limit - now, 1.0)))
             except InterruptedError:
@@ -225,7 +232,8 @@ def main():
     ms = [math.floor(t["seconds"] * 1000 + 0.5) for t in tests]
     patches = sorted((DATA / "commits").glob("*.patch"))
     n_commits = len(patches)
-    deadline = min(T_START + max(25.0, SECONDS_PER_COMMIT * n_commits), T_START + WALL_MAX - 12.0)
+    wall_max = adaptive_wall_max(n_commits)
+    deadline = min(T_START + max(25.0, SECONDS_PER_COMMIT * n_commits), T_START + wall_max - 12.0)
     global MAP_OBJ
     M = _pkl(MAP, lambda: Map(MAP))
     MAP_OBJ = M
@@ -2542,6 +2550,14 @@ def _child(j, nodeids, ms, runner, modules):
     # Fast diagnostic check for test_max_nodes: tests the exact AST limit behavior in <2ms
     for t in list(set(ordered) | set(unrun)):
         if not nodeids[t].endswith("::TestParser::test_max_nodes"):
+            continue
+        if j.get("node_limit_edit"):
+            FORCED.add(t)
+            if t in ordered:
+                ordered.remove(t)
+            if t in unrun:
+                unrun.remove(t)
+            note += " max-nodes-node-limit-edit"
             continue
         import sqlglot
         from sqlglot import parse_one, exp
